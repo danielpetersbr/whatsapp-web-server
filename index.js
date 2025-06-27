@@ -1,77 +1,81 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const cors = require('cors');
+
 const app = express();
+const port = process.env.PORT || 10000;
 
 app.use(cors());
 app.use(express.json());
 
-let qrCodeData = null;
-let isAuthenticated = false;
+let client;
+let qrCodeData = '';
+let isConnected = false;
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  },
-});
+// Endpoint para iniciar conexão com o WhatsApp
+app.post('/connect', async (req, res) => {
+  if (client) {
+    return res.status(400).json({ error: 'Já conectado ou tentativa em andamento.' });
+  }
 
-client.on('qr', (qr) => {
-  qrcode.toDataURL(qr, (err, src) => {
-    qrCodeData = src;
+  client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    },
   });
+
+  client.on('qr', async (qr) => {
+    qrCodeData = await qrcode.toDataURL(qr);
+    console.log('QR Code atualizado');
+  });
+
+  client.on('ready', () => {
+    console.log('✅ Cliente pronto');
+    isConnected = true;
+  });
+
+  client.on('disconnected', (reason) => {
+    console.log('❌ Cliente desconectado:', reason);
+    client = null;
+    isConnected = false;
+    qrCodeData = '';
+  });
+
+  await client.initialize();
+
+  res.json({ status: 'Inicializado com sucesso' });
 });
 
-client.on('ready', () => {
-  isAuthenticated = true;
-  console.log('✅ WhatsApp conectado!');
-});
-
-client.on('disconnected', () => {
-  isAuthenticated = false;
-  console.log('❌ WhatsApp desconectado.');
-});
-
+// QR code como imagem base64
 app.get('/qr', (req, res) => {
   if (qrCodeData) {
-    res.send(`<img src="${qrCodeData}" />`);
+    const html = `
+      <html>
+        <body>
+          <h1>Escaneie o QR Code:</h1>
+          <img src="${qrCodeData}" />
+        </body>
+      </html>
+    `;
+    res.send(html);
   } else {
     res.send('Aguardando geração do QR...');
   }
 });
 
+// Status de conexão
 app.get('/status', (req, res) => {
-  res.json({ connected: isAuthenticated });
+  res.json({ connected: isConnected });
 });
 
-// Rota que inicia o WhatsApp (exigida pelo Lovable)
-app.post('/connect', async (req, res) => {
-  try {
-    if (!isAuthenticated) {
-      await client.initialize();
-    }
-    res.json({ status: 'Inicialização disparada' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erro ao conectar' });
-  }
+// Rota padrão (opcional)
+app.get('/', (req, res) => {
+  res.send('Servidor WhatsApp rodando com sucesso!');
 });
 
-// Rota para envio de mensagem
-app.post('/send', async (req, res) => {
-  const { to, message } = req.body;
-  try {
-    await client.sendMessage(`${to}@c.us`, message);
-    res.json({ status: 'Mensagem enviada com sucesso' });
-  } catch (e) {
-    res.status(500).json({ error: 'Erro ao enviar mensagem' });
-  }
-});
-
-// Porta + host obrigatórios para funcionar no Render
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+// Bind para 0.0.0.0 (essencial para Render)
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Servidor rodando na porta ${port}`);
 });
