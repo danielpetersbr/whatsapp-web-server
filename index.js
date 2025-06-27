@@ -1,60 +1,65 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
-const qrcode  = require('qrcode');
-const cors    = require('cors');
-
+const qrcode = require('qrcode');
+const cors = require('cors');
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-// --- variáveis de estado ---
-let qrCodeData     = null;
+let qrCodeData = null;
 let isAuthenticated = false;
 
-// --- instancia o cliente ---
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
+  },
+});
+
+client.on('qr', (qr) => {
+  qrcode.toDataURL(qr, (err, src) => {
+    qrCodeData = src;
+  });
+});
+
+client.on('ready', () => {
+  isAuthenticated = true;
+  console.log('✅ WhatsApp conectado!');
+});
+
+client.on('disconnected', () => {
+  isAuthenticated = false;
+  console.log('❌ WhatsApp desconectado.');
+});
+
+app.get('/qr', (req, res) => {
+  if (qrCodeData) {
+    res.send(`<img src="${qrCodeData}" />`);
+  } else {
+    res.send('Aguardando geração do QR...');
   }
 });
 
-// dispara sempre que há novo QR
-client.on('qr', qr => {
-  qrcode.toDataURL(qr, (_, src) => qrCodeData = src);
+app.get('/status', (req, res) => {
+  res.json({ connected: isAuthenticated });
 });
 
-client.on('ready',        () => { isAuthenticated = true;  console.log('✅ WhatsApp conectado!'); });
-client.on('disconnected', () => { isAuthenticated = false; console.log('❌ WhatsApp desconectado.'); });
-
-client.initialize();
-
-/* ------------ ROTAS ------------ */
-
-// inicia (ou reinicia) a sessão e faz o QR voltar a ser gerado
-app.post('/connect', async (_, res) => {
+// Rota que inicia o WhatsApp (exigida pelo Lovable)
+app.post('/connect', async (req, res) => {
   try {
-    if (client.info && client.info.wid) await client.destroy(); // se já havia sessão, derruba
-    qrCodeData = null;
-    isAuthenticated = false;
-    await client.initialize();
-    res.json({ status: 'Inicializando, abra /qr para escanear' });
+    if (!isAuthenticated) {
+      await client.initialize();
+    }
+    res.json({ status: 'Inicialização disparada' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Falha ao iniciar conexão' });
+    res.status(500).json({ error: 'Erro ao conectar' });
   }
 });
 
-// devolve o QR (se já tiver sido disparado pelo evento acima)
-app.get('/qr', (_, res) => {
-  qrCodeData
-    ? res.send(`<img src="${qrCodeData}" />`)
-    : res.send('Aguardando geração do QR…');
-});
-
-app.get('/status', (_, res) => res.json({ connected: isAuthenticated }));
-
+// Rota para envio de mensagem
 app.post('/send', async (req, res) => {
   const { to, message } = req.body;
   try {
@@ -65,6 +70,8 @@ app.post('/send', async (req, res) => {
   }
 });
 
-/* ----------- start ----------- */
+// Porta + host obrigatórios para funcionar no Render
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
