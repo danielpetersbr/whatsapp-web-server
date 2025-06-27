@@ -1,4 +1,3 @@
-
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
 const qrcode = require('qrcode');
@@ -59,7 +58,8 @@ app.post('/send', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+// ⚠️ ALTERAÇÃO AQUI PARA COMPATIBILIDADE COM RENDER
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
